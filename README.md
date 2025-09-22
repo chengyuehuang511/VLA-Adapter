@@ -539,16 +539,13 @@ CUDA_VISIBLE_DEVICES=0 python vla-scripts/evaluate_calvin.py \
   > eval_logs/CALVIN--ABC.log 2>&1 &
 ```
 
-The evaluation script will run 500 trials by default (10 tasks x 50 episodes each) in LIBERO and 1,000 task sequences in CALVIN. Use the same card for training and inference whenever possible. **Note that results may vary slightly if you use a different GPU than the H100.** 
-
-
 If you want to get the inference **throughput**, you can run it in the `run_libero_eval.py` file. You can add  `start = time.time()` and `end = time.time()` before and after `lines 334--345` and calculate the difference between the two. This difference is the time it takes to generate `8 chunks`. This gives you the inference throughput. We measured it multiple times and took the average value of `0.036s`.
 
 <br/>
 
 ## 🌈 Success Rate Comparison <a name="results"></a>
 
-All our results are inferred on `H100`. You can find the inference `log` file in the model released on [HF](https://huggingface.co/VLA-Adapter) for viewing.
+All our results are inferred on `H100`. You can find the inference `log` file in the model released on [HF](https://huggingface.co/VLA-Adapter) for viewing. The evaluation script will run 500 trials by default (10 tasks x 50 episodes each) in LIBERO and 1,000 task sequences in CALVIN. Use the same card for training and inference whenever possible. **Note that results may vary slightly if you use a different GPU than the H100.** This phenomenon is also mentioned in the OpenVLA-OFT readme file.
 
 ### Performance on LIBERO benchmark. 
 
