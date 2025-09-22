@@ -89,7 +89,7 @@ pip install torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0
 
 # Clone vla-adapter repo and pip install to download dependencies
 git clone https://github.com/OpenHelix-Team/VLA-Adapter.git
-cd vla-adapter
+cd VLA-Adapter
 pip install -e .
 
 pip install packaging ninja
