@@ -30,6 +30,7 @@
 ## :black_nib: TODO List<a name="todo"></a>
 
 - [x]  Release **checkpoints** for reproduction.
+- [ ]  Release [VLA-Adapter v2 paper](https://arxiv.org/abs/2509.09372).
 - [ ]  A more **powerful version**, **VLA-Adapter++**, and a detailed **technical report** 📝 will be released soon.<br/>
 - [ ]  Continue to update the code to adapt to various **real-world systems** deployments, including the configuration of our paper, Franka, UR-5, and AGILE Piper.<br/>
 - [ ]  It will soon be compatible with **various foundation models**, including but not limited to [VPP](https://arxiv.org/abs/2412.14803), [π0.5](https://arxiv.org/abs/2504.16054).<br/>
