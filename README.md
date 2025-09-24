@@ -6,12 +6,12 @@
 
 </div>
 
->### The official implementation of **VLA-Adapter**.
+### The official implementation of **VLA-Adapter**.
 <br/>
 
 <div id="top" align="center">
 <p align="center">
-<img src=figure/Framework.png width=95% />
+<img src=figure/Framework.png width=90% />
 </p>
 </div>
 
