@@ -1,7 +1,10 @@
 <div align="center">
   <img src="figure/LOGO2.png" width="70%" style="vertical-align:-7px;" />
-</div>
 
+
+[![Paper](https://img.shields.io/badge/Paper-A42C25?style=for-the-badge&logo=arxiv&logoColor=white)](https://arxiv.org/pdf/2509.09372) [![Github](https://img.shields.io/badge/GitHub-black?style=for-the-badge&logo=github&logoColor=white)](https://github.com/OpenHelix-Team/VLA-Adapter) [![Hugging Face Collection](https://img.shields.io/badge/Models-fcd022?style=for-the-badge&logo=huggingface&logoColor=white)](https://huggingface.co/VLA-Adapter) [![Twitter](https://img.shields.io/badge/AK-%23000000.svg?style=for-the-badge&logo=x&logoColor=white)](https://x.com/_akhaliq/status/1966610780838621241) [![WeChat](https://img.shields.io/badge/WeChat--Group-07C160?style=for-the-badge&logo=wechat&logoColor=white)](https://github.com/OpenHelix-Team/VLA-Adapter/issues/1)
+
+</div>
 
 >### The official implementation of **VLA-Adapter**. If you want to discuss the VLA-Adapter, please feel free to join our **WeChat group**. The QR code is [here](https://github.com/OpenHelix-Team/VLA-Adapter/issues/1)!
 <br/>
