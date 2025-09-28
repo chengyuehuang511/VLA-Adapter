@@ -1,11 +1,11 @@
 Metadata-Version: 2.4
-Name: openvla-oft
+Name: vla-adapter
 Version: 0.0.1
 Summary: Fine-Tuning Vision-Language-Action Models: Optimizing Speed and Success
-Author-email: Moo Jin Kim <moojink@stanford.edu>, Chelsea Finn <cbfinn@cs.stanford.edu>, Percy Liang <pliang@cs.stanford.edu>
+Author-email: Yihao Wang, Pengxiang Ding, Lingxiao Li et al.
 License: MIT License
         
-        Copyright (c) 2025 Moo Jin Kim, Chelsea Finn, Percy Liang.
+        Copyright (c) 2025 Yihao Wang, Pengxiang Ding, Lingxiao Li et al.
         
         Permission is hereby granted, free of charge, to any person obtaining a copy
         of this software and associated documentation files (the "Software"), to deal
@@ -92,12 +92,8 @@ Dynamic: license-file
 
 ## System Requirements
 
-Inference:
-* 1 GPU with ~16 GB VRAM for LIBERO sim benchmark tasks
-* 1 GPU with ~18 GB VRAM for ALOHA robot tasks
-
 Training:
-* Between 1-8 GPUs with 27-80 GB, depending on the desired training setup (with default bfloat16 data type). See [this FAQ on our project website](https://openvla-oft.github.io/#train-compute) for details.
+* Between 1-8 GPUs with 10-80 GB, depending on the desired training setup (with default bfloat16 data type). See [this FAQ on our project website](https://openvla-oft.github.io/#train-compute) for details.
 
 ## Quick Start
 
@@ -172,10 +168,10 @@ If you run into any issues, please open a new GitHub issue. If you do not receiv
 If you use our code in your work, please cite [our paper](https://arxiv.org/abs/2502.19645):
 
 ```bibtex
-@article{kim2025fine,
-  title={Fine-Tuning Vision-Language-Action Models: Optimizing Speed and Success},
-  author={Kim, Moo Jin and Finn, Chelsea and Liang, Percy},
-  journal={arXiv preprint arXiv:2502.19645},
+@article{wang2025vlaadapter,
+  title={VLA-Adapter: An Effective Paradigm for Tiny-Scale Vision-Language-Action Model},
+  author={Wang, Yihao and Ding, Pengxiang and Li, Lingxiao and Cui, Can and Ge, Zirui and Tong, Xinyang and Song, Wenxuan and Zhao, Han and Zhao, Wei and Hou, Pengxu and Huang, Siteng and Tang, Yifan and Wang, Wenhui and Zhang, Ru and Liu, Jianyi and Wang, Donglin},  
+  journal={arXiv preprint arXiv:2509.09372},
   year={2025}
 }
 ```
