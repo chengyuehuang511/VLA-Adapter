@@ -132,7 +132,7 @@ To download the [LIBERO datasets](https://huggingface.co/datasets/openvla/modifi
 git clone git@hf.co:datasets/openvla/modified_libero_rlds
 ```
 
-Attention! The dataset downloaded in this way needs to remove of the ``modified_`` word to adapt to the path of - [:pushpin: Benchmark Location](#pushpin-benchmark-location)!!!
+🌟 Attention! The dataset downloaded in this way needs to remove of the ``modified_`` word to adapt to the path of - [:pushpin: Benchmark Location](#pushpin-benchmark-location)!!!
 
 When using LIBERO, you may get an error message like `AttributeError: 'NoneType' object has no attribute 'eglQueryString'`. You can use:
 
