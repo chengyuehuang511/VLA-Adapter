@@ -70,7 +70,6 @@ class L1RegressionActionHead(nn.Module):
             batch_size, seq_len, dim = rearranged_actions_hidden_states.shape
             random_perturbations = learnable_random_perturbations(seq_len, dim, device=rearranged_actions_hidden_states.device, dtype=rearranged_actions_hidden_states.dtype) 
             rearranged_actions_hidden_states = (rearranged_actions_hidden_states + random_perturbations) # (1, seq_len, dim)
-            print("-----------------")
 
         action = self.model(
             rearranged_actions_hidden_states,
