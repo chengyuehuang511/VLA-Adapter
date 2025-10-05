@@ -50,3 +50,7 @@ srun -u ${PYTHON_BIN} -m torch.distributed.run \
   --wandb_entity "chuang475-georgia-institute-of-technology" \
   --wandb_project "$data_name" \
   --run_id_note VLA-Adapter--object--$current_time \
+  # --resume True \
+  # --resume_step 5000 \
+  # --config_file_path outputs/configs+libero_object_no_noops+b8+lr-0.0002+lora-r64+dropout-0.0--image_aug--VLA-Adapter--object----5000_chkpt \
+  # --resum_vla_path outputs/configs+libero_object_no_noops+b8+lr-0.0002+lora-r64+dropout-0.0--image_aug--VLA-Adapter--object----5000_chkpt \

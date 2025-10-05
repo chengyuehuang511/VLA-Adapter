@@ -556,7 +556,7 @@ def save_training_checkpoint(
         # Save processor and LoRA adapter
         processor.save_pretrained(checkpoint_dir)
 
-        if cfg.use_fz:
+        if not cfg.use_lora:
             vla.module.save_pretrained(checkpoint_dir) # directly save checkpoint without lora
         else:
             vla.module.save_pretrained(adapter_dir)
@@ -585,6 +585,16 @@ def save_training_checkpoint(
     # Merge LoRA weights into base model and save resulting model checkpoint
     # Note: Can be very slow on some devices; if so, we recommend merging offline
     if cfg.use_lora and cfg.merge_lora_during_training:
+        if distributed_state.is_main_process:
+            print("[merge] Offloading training model to CPU to free GPU memory...")
+
+        # Offload current training model to CPU to free VRAM during merge
+        #    (DDP wrapper remains, but parameters/buffers move off GPU)
+        device_id = next(vla.module.parameters()).device
+        print("device id: ", device_id)
+        vla.module.to("cpu")
+        torch.cuda.empty_cache()
+
         if cfg.use_minivlm:
             config = AutoConfig.from_pretrained("pretrained_models/configs/config.json")
             base_vla = AutoModelForVision2Seq.from_config(config, torch_dtype=torch.bfloat16)  # Create a new model with configuration, the parameters are randomly initialized
@@ -608,6 +618,14 @@ def save_training_checkpoint(
         # Wait for merged model to be saved
         dist.barrier()
 
+        del base_vla
+        del merged_vla
+        torch.cuda.empty_cache()
+
+        if distributed_state.is_main_process:
+            print("[merge] Moving training model back to GPU...")
+
+        vla.module.to(device_id)
 
 
 def run_validation(
@@ -736,7 +754,7 @@ def finetune(cfg: FinetuneConfig) -> None:
 
     # Initialize wandb logging
     if distributed_state.is_main_process:
-        wandb.init(project=cfg.wandb_project, name=f"ft+{run_id}", mode="offline")
+        wandb.init(project=cfg.wandb_project, name=f"ft+{run_id}") # , mode="offline"
 
     # Print detected constants
     print(
