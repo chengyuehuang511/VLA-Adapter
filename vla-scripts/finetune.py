@@ -6,6 +6,14 @@ Fine-tunes Qwen2.5-0.5B via LoRA.
 
 import os
 import time
+import sys
+
+# Ensure project root (parent of this script) is on sys.path so that `experiments` can be imported when
+# running under SLURM / torchrun from arbitrary working directories.
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path

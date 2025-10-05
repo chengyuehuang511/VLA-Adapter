@@ -153,6 +153,9 @@ rollouts/
 wandb/
 
 output/
+outputs/
 experiments/logs/
 results/
 runs/
+data/
+pretrained_models/
