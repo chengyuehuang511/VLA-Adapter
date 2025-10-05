@@ -154,3 +154,5 @@ wandb/
 
 output/
 experiments/logs/
+results/
+runs/

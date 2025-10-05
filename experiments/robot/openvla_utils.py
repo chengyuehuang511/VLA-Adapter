@@ -294,7 +294,7 @@ def get_vla(cfg: Any) -> torch.nn.Module:
         AutoModelForVision2Seq.register(OpenVLAConfig, OpenVLAForActionPrediction)
 
         # Update config.json and sync model files
-        update_auto_map(cfg.pretrained_checkpoint)
+        # update_auto_map(cfg.pretrained_checkpoint)
         check_model_logic_mismatch(cfg.pretrained_checkpoint)
 
     # Load the model
