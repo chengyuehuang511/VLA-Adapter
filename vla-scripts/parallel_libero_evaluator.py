@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-# os.environ["MUJOCO_GL"] = "osmesa"
+os.environ["MUJOCO_GL"] = "osmesa"
 import sys
 from collections import deque
 from dataclasses import dataclass
@@ -113,7 +113,7 @@ class ParallelLiberoEvaluator:
         self._validate_config(cfg)
 
         # [Note] Tokenizers parallelism is set to true for faster tokenization
-        # os.environ["TOKENIZERS_PARALLELISM"] = 'true'
+        os.environ["TOKENIZERS_PARALLELISM"] = 'true'
         
     def evaluate(self):
         from libero.libero import benchmark
