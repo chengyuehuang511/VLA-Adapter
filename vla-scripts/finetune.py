@@ -7,6 +7,7 @@ Fine-tunes Qwen2.5-0.5B via LoRA.
 import os
 import time
 import sys
+import copy
 
 # Ensure project root (parent of this script) is on sys.path so that `experiments` can be imported when
 # running under SLURM / torchrun from arbitrary working directories.
@@ -65,6 +66,7 @@ from prismatic.vla.constants import (
 from prismatic.vla.datasets import RLDSDataset, RLDSBatchTransform
 from prismatic.vla.datasets.rlds.utils.data_utils import save_dataset_statistics
 from prismatic.models import load, load_vla
+from prismatic.training.optimizers import SPD
 
 
 
@@ -111,6 +113,8 @@ class FinetuneConfig:
     resume_step: Optional[int] = None                # (When `resume==True`) Step number that we are resuming from
     image_aug: bool = True                           # If True, trains with image augmentations (HIGHLY RECOMMENDED)
     diffusion_sample_freq: int = 50                  # (When `use_diffusion==True`) Frequency for sampling in steps
+    optimizer: str = "AdamW"                         # Optimizer to use (AdamW or SPD)
+    weight_decay: float = 0                          # Weight decay for optimizer (only applied to non-bias and non-LayerNorm params)
 
     # LoRA
     use_lora: bool = False                           # If True, uses LoRA fine-tuning
@@ -187,6 +191,8 @@ def get_run_id(cfg) -> str:
             f"{cfg.config_file_path.split('/')[-1]}+{cfg.dataset_name}"
             f"+b{cfg.batch_size * cfg.grad_accumulation_steps}"
             f"+lr-{cfg.learning_rate}"
+            f"+{cfg.optimizer}"
+            f"+wd-{cfg.weight_decay}"
         )
         if cfg.use_fz:
             run_id += f"+frozen+dropout-{cfg.lora_dropout}"
@@ -873,6 +879,9 @@ def finetune(cfg: FinetuneConfig) -> None:
         for name, param in vla.named_parameters():
             if "action_queries" in name:
                 param.requires_grad = True
+            else:
+                assert param.requires_grad == True, f"Parameter {name} is frozen"
+        print("Fine-tuning all parameters of the model.")
 
     # FiLM setup
     if cfg.use_film:
@@ -933,7 +942,49 @@ def finetune(cfg: FinetuneConfig) -> None:
     if cfg.use_proprio:
         trainable_params += [param for param in proprio_projector.parameters() if param.requires_grad]
     print(f"# total trainable params: {sum(p.numel() for p in trainable_params)}")
-    optimizer = AdamW(trainable_params, lr=cfg.learning_rate)
+
+    decay, no_decay = [], []
+            
+    for name, param in vla.module.named_parameters():
+        if not param.requires_grad:
+            continue
+
+        # Check on any parameters with fewer than 2 dimensions or with "bias" in the name
+        if param.ndim <= 1 or name.endswith(".bias"):
+            no_decay.append(param)
+        else:
+            decay.append(param)
+    
+    # Collect parameters from action head
+    if action_head is not None:
+        for name, param in action_head.module.named_parameters():
+            if not param.requires_grad:
+                continue
+            no_decay.append(param)
+    
+    # Collect parameters from proprio projector
+    if proprio_projector is not None:
+        for name, param in proprio_projector.module.named_parameters():
+            if not param.requires_grad:
+                continue
+            no_decay.append(param)
+    
+    # Build Parameter Groups
+    groups = [{"params": decay, "weight_decay": cfg.weight_decay}, {"params": no_decay, "weight_decay": 0.0}]
+    if cfg.optimizer != "AdamW":
+        decay_params_anchor = copy.deepcopy(decay)
+        no_decay_params_anchor = copy.deepcopy(no_decay)
+        # put decay_params_anchor and no_decay_params_anchor to cpu
+        # for p in decay_params_anchor + no_decay_params_anchor:
+        #     p.data = p.data.cpu()
+        groups[0]["pre"] = decay_params_anchor
+        groups[1]["pre"] = no_decay_params_anchor
+
+    # Create Optimizer & LR Scheduler
+    optimizer = eval(cfg.optimizer)(groups, lr=cfg.learning_rate)
+    print("Optimizer:", optimizer)
+
+    # optimizer = AdamW(trainable_params, lr=cfg.learning_rate)
 
     # Record original learning rate
     original_lr = optimizer.param_groups[0]["lr"]

@@ -1,10 +1,10 @@
 #!/bin/bash
 
-name="train_libero_spatial"
+# name="train_libero_spatial"
 # name="train_libero_object"
 # name="train_libero_goal"
 # name="train_libero_long"
-# name="train_libero_90"
+name="train_libero_90"
 
 job_name="${name}_$(date +%Y%m%d_%H%M%S)"
 output_dir="output/${job_name}"

@@ -22,13 +22,20 @@ num_gpus=8
 num_processes=32
 task_suite_names=(
     # "libero_90"
-    # "libero_goal"
-    # "libero_object"
-    # "libero_spatial"
+    "libero_goal"
+    "libero_object"
+    "libero_spatial"
     "libero_10"
 )
 
-name="VLA-Adapter/LIBERO-Long-Pro"
+# name="runs/VLA-Adapter/LIBERO-Long-Pro"
+# name="runs/VLA-Adapter/LIBERO-Goal-Pro"
+# name="runs/VLA-Adapter/LIBERO-Object-Pro"
+# name="runs/VLA-Adapter/LIBERO-Spatial-Pro"
+# name="outputs/configs+libero_object_no_noops+b8+lr-0.0002+lora-r64+dropout-0.0--image_aug--VLA-Adapter--object----5000_chkpt"
+# name="outputs/configs+libero_90_no_noops+b8+lr-0.0002--image_aug--VLA-Adapter--90----50000_chkpt"
+name="outputs/configs+libero_90_no_noops+b8+lr-1e-05--image_aug--VLA-Adapter--90----50000_chkpt"
+# name="outputs/configs+libero_90_no_noops+b8+lr-1e-05--VLA-Adapter--90----50000_chkpt"
 
 # srun -u ${PYTHON_BIN} -m experiments.robot.libero.run_libero_eval \
 #   --use_proprio True \
@@ -44,8 +51,8 @@ for task_suite_name in "${task_suite_names[@]}"; do
         --num-gpus $num_gpus \
         --num-processes $num_processes \
         --task-suite-name $task_suite_name \
-        --pretrained-checkpoint runs/$name \
-        --save-root results/$name \
+        --pretrained-checkpoint $name \
+        --save-root results/osmesa/$name \
         --center-crop true \
         --use-l1-regression \
         --use-proprio \

@@ -372,7 +372,8 @@ class ParallelLiberoEvaluator:
     def _check_unnorm_key(self, cfg: GenerateConfig, model) -> None:
         """Check that the model contains the action un-normalization key."""
         # Initialize unnorm_key
-        unnorm_key = cfg.task_suite_name
+        # unnorm_key = cfg.task_suite_name
+        unnorm_key = 'libero_90'
 
         # In some cases, the key must be manually modified (e.g. after training on a modified version of the dataset
         # with the suffix "_no_noops" in the dataset name)
