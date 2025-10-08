@@ -126,6 +126,8 @@ class FinetuneConfig:
 
     # Full Finetune
     use_fz: bool = False                             # If True, uses LoRA fine-tuning
+    freeze_vlm: bool = False                         # If True, freeze all parameters of the model except action queries.
+                                                     #   Note: cannot be used together with `use_lora`
 
     # Logging
     wandb_entity: str = "your-wandb-entity"          # Name of WandB entity
@@ -193,9 +195,12 @@ def get_run_id(cfg) -> str:
             f"+lr-{cfg.learning_rate}"
             f"+{cfg.optimizer}"
             f"+wd-{cfg.weight_decay}"
+            f"+x-action_queries"
         )
         if cfg.use_fz:
             run_id += f"+frozen+dropout-{cfg.lora_dropout}"
+        if cfg.freeze_vlm:
+            run_id += f"+freeze_vlm"
         if cfg.use_lora:
             run_id += f"+lora-r{cfg.lora_rank}+dropout-{cfg.lora_dropout}"
         if cfg.image_aug:
@@ -874,6 +879,14 @@ def finetune(cfg: FinetuneConfig) -> None:
             if "action_queries" in name:
                 param.requires_grad = True
         vla.print_trainable_parameters()
+    
+    elif cfg.freeze_vlm:
+        for name, param in vla.named_parameters():
+            if "action_queries" in name:
+                param.requires_grad = True
+            else:
+                param.requires_grad = False
+        print("Freezing all parameters of the model except action queries.")
 
     else:
         for name, param in vla.named_parameters():
@@ -943,35 +956,41 @@ def finetune(cfg: FinetuneConfig) -> None:
         trainable_params += [param for param in proprio_projector.parameters() if param.requires_grad]
     print(f"# total trainable params: {sum(p.numel() for p in trainable_params)}")
 
-    decay, no_decay = [], []
-            
-    for name, param in vla.module.named_parameters():
-        if not param.requires_grad:
-            continue
+    if cfg.optimizer == "AdamW":
+        optimizer = AdamW(trainable_params, lr=cfg.learning_rate)
 
-        # Check on any parameters with fewer than 2 dimensions or with "bias" in the name
-        if param.ndim <= 1 or name.endswith(".bias"):
-            no_decay.append(param)
-        else:
-            decay.append(param)
-    
-    # Collect parameters from action head
-    if action_head is not None:
-        for name, param in action_head.module.named_parameters():
+    else:
+        decay, no_decay = [], []
+                
+        for name, param in vla.module.named_parameters():
             if not param.requires_grad:
                 continue
-            no_decay.append(param)
-    
-    # Collect parameters from proprio projector
-    if proprio_projector is not None:
-        for name, param in proprio_projector.module.named_parameters():
-            if not param.requires_grad:
-                continue
-            no_decay.append(param)
-    
-    # Build Parameter Groups
-    groups = [{"params": decay, "weight_decay": cfg.weight_decay}, {"params": no_decay, "weight_decay": 0.0}]
-    if cfg.optimizer != "AdamW":
+
+            # Check on any parameters with fewer than 2 dimensions or with "bias" in the name
+            if param.ndim <= 1 or name.endswith(".bias") or "action_queries" in name:
+                if "action_queries" in name:
+                    print(f"Excluding {name} from weight decay")
+                no_decay.append(param)
+            else:
+                decay.append(param)
+        
+        # Collect parameters from action head
+        if action_head is not None:
+            for name, param in action_head.module.named_parameters():
+                if not param.requires_grad:
+                    continue
+                no_decay.append(param)
+        
+        # Collect parameters from proprio projector
+        if proprio_projector is not None:
+            for name, param in proprio_projector.module.named_parameters():
+                if not param.requires_grad:
+                    continue
+                no_decay.append(param)
+        
+        # Build Parameter Groups
+        groups = [{"params": decay, "weight_decay": cfg.weight_decay}, {"params": no_decay, "weight_decay": 0.0}]
+        
         decay_params_anchor = copy.deepcopy(decay)
         no_decay_params_anchor = copy.deepcopy(no_decay)
         # put decay_params_anchor and no_decay_params_anchor to cpu
@@ -980,11 +999,10 @@ def finetune(cfg: FinetuneConfig) -> None:
         groups[0]["pre"] = decay_params_anchor
         groups[1]["pre"] = no_decay_params_anchor
 
-    # Create Optimizer & LR Scheduler
-    optimizer = eval(cfg.optimizer)(groups, lr=cfg.learning_rate)
+        # Create Optimizer & LR Scheduler
+        optimizer = eval(cfg.optimizer)(groups, lr=cfg.learning_rate)
+    
     print("Optimizer:", optimizer)
-
-    # optimizer = AdamW(trainable_params, lr=cfg.learning_rate)
 
     # Record original learning rate
     original_lr = optimizer.param_groups[0]["lr"]

@@ -21,11 +21,11 @@ cd /coc/testnvme/chuang475/projects/VLA-Adapter
 num_gpus=8
 num_processes=32
 task_suite_names=(
-    # "libero_90"
-    "libero_goal"
-    "libero_object"
-    "libero_spatial"
-    "libero_10"
+    "libero_90"
+    # "libero_goal"
+    # "libero_object"
+    # "libero_spatial"
+    # "libero_10"
 )
 
 # name="runs/VLA-Adapter/LIBERO-Long-Pro"
@@ -34,8 +34,10 @@ task_suite_names=(
 # name="runs/VLA-Adapter/LIBERO-Spatial-Pro"
 # name="outputs/configs+libero_object_no_noops+b8+lr-0.0002+lora-r64+dropout-0.0--image_aug--VLA-Adapter--object----5000_chkpt"
 # name="outputs/configs+libero_90_no_noops+b8+lr-0.0002--image_aug--VLA-Adapter--90----50000_chkpt"
-name="outputs/configs+libero_90_no_noops+b8+lr-1e-05--image_aug--VLA-Adapter--90----50000_chkpt"
+# name="outputs/configs+libero_90_no_noops+b8+lr-1e-05--image_aug--VLA-Adapter--90----50000_chkpt"
 # name="outputs/configs+libero_90_no_noops+b8+lr-1e-05--VLA-Adapter--90----50000_chkpt"
+# name="outputs/configs+libero_90_no_noops+b8+lr-1e-05+SPD+wd-1.0--image_aug--VLA-Adapter--90----50000_chkpt"
+name="outputs/configs+libero_90_no_noops+b8+lr-1e-05+SPD+wd-3.0+x-action_queries--image_aug--VLA-Adapter--90----50000_chkpt"
 
 # srun -u ${PYTHON_BIN} -m experiments.robot.libero.run_libero_eval \
 #   --use_proprio True \
@@ -47,7 +49,7 @@ name="outputs/configs+libero_90_no_noops+b8+lr-1e-05--image_aug--VLA-Adapter--90
 
 for task_suite_name in "${task_suite_names[@]}"; do
     srun -u ${PYTHON_BIN} -m vla-scripts.parallel_libero_evaluator \
-        --num-trials-per-task 50 \
+        --num-trials-per-task 10 \
         --num-gpus $num_gpus \
         --num-processes $num_processes \
         --task-suite-name $task_suite_name \
