@@ -221,10 +221,11 @@ class ParallelLiberoEvaluator:
             initial_state = np.array(all_initial_states[initial_states_task_key][episode_key]["initial_state"])
 
         # Set initial state if provided
-        if initial_state is not None:
-            obs = env.set_init_state(initial_state)
-        else:
-            obs = env.get_observation()
+        if not self.cfg.task_suite_name == 'libero_object':
+            if initial_state is not None:
+                obs = env.set_init_state(initial_state)
+            else:
+                obs = env.get_observation()
 
         # Initialize action queue
         NUM_ACTIONS_CHUNK = 8  # Default value; replace with actual constant if available

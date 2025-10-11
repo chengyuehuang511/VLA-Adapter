@@ -128,6 +128,10 @@ class FinetuneConfig:
     use_fz: bool = False                             # If True, uses LoRA fine-tuning
     freeze_vlm: bool = False                         # If True, freeze all parameters of the model except action queries.
                                                      #   Note: cannot be used together with `use_lora`
+    freeze_language: bool = False                    # If True, freeze all parameters of the language model except action queries.
+    unfreeze_last_llm_layer: bool = False            # If True, unfreeze the last transformer layer of the language model.
+    freeze_vision: bool = False                      # If True, freeze all parameters of the vision backbone.
+    lpft_path: Optional[str] = None                  # load action head etc from lpft checkpoint
 
     # Logging
     wandb_entity: str = "your-wandb-entity"          # Name of WandB entity
@@ -201,6 +205,14 @@ def get_run_id(cfg) -> str:
             run_id += f"+frozen+dropout-{cfg.lora_dropout}"
         if cfg.freeze_vlm:
             run_id += f"+freeze_vlm"
+        if cfg.freeze_language:
+            if cfg.unfreeze_last_llm_layer:
+                run_id += f"+unfreeze_last_llm_layer"
+            run_id += f"+freeze_language"
+        if cfg.freeze_vision:
+            run_id += f"+freeze_vision"
+        if cfg.lpft_path is not None:
+            run_id += f"+lpft"
         if cfg.use_lora:
             run_id += f"+lora-r{cfg.lora_rank}+dropout-{cfg.lora_dropout}"
         if cfg.image_aug:
@@ -295,6 +307,11 @@ def init_module(
         state_dict = load_checkpoint(module_name, cfg.resum_vla_path, cfg.resume_step)
         module.load_state_dict(state_dict)
         print('loaded!!!!!!!!!')
+    if cfg.lpft_path is not None:
+        resume_step = int(cfg.lpft_path.split("--")[-1].split("_chkpt")[0])
+        lpft_state_dict = load_checkpoint(module_name, cfg.lpft_path, resume_step)
+        module.load_state_dict(lpft_state_dict, strict=False)
+        print('loaded lpft!!!!!!!!!')
 
     if to_bf16:
         module = module.to(torch.bfloat16)
@@ -811,7 +828,16 @@ def finetune(cfg: FinetuneConfig) -> None:
     AutoProcessor.register(OpenVLAConfig, PrismaticProcessor)
     processor = AutoProcessor.from_pretrained(cfg.config_file_path, trust_remote_code=True)
 
-    if cfg.use_minivlm:
+    if cfg.lpft_path is not None:
+        RAW_STATE_DICT ={}
+        vla = AutoModelForVision2Seq.from_pretrained(
+            cfg.lpft_path,
+            torch_dtype=torch.bfloat16,
+            low_cpu_mem_usage=False,
+            trust_remote_code=False,
+            ).to(device_id)
+        
+    elif cfg.use_minivlm:
         hf_token = ''
         if 'prism-qwen25-extra-dinosiglip-224px-0_5b' in cfg.vlm_path:
             
@@ -860,6 +886,8 @@ def finetune(cfg: FinetuneConfig) -> None:
             low_cpu_mem_usage=False,
             trust_remote_code=False,
             ).to(device_id)
+    
+    print("vla", vla)
 
     # Set number of images in VLA input
     vla.vision_backbone.set_num_images_in_input(cfg.num_images_in_input)
@@ -887,7 +915,30 @@ def finetune(cfg: FinetuneConfig) -> None:
             else:
                 param.requires_grad = False
         print("Freezing all parameters of the model except action queries.")
-
+    elif cfg.freeze_language:
+        for name, param in vla.named_parameters():
+            if "action_queries" in name:
+                param.requires_grad = True
+            elif "language_model" in name:
+                print(f"Freezing parameter: {name}")
+                param.requires_grad = False
+        print("Freezing all parameters of the language model.")
+        
+        if cfg.unfreeze_last_llm_layer:
+            # Unfreeze final LLM layer
+            last_layer = (vla.language_model.model.embed_tokens, vla.language_model.model.layers[-1], vla.language_model.lm_head)
+            for module in last_layer:
+                print(f"Unfreezing parameter: {module}")
+                module.requires_grad_(True)
+            print("Unfreezing the last layer of the language model.")
+    elif cfg.freeze_vision:
+        for name, param in vla.named_parameters():
+            if "action_queries" in name:
+                param.requires_grad = True
+            elif "vision_backbone" in name:
+                print(f"Freezing parameter: {name}")
+                param.requires_grad = False
+        print("Freezing all parameters of the vision backbone.")
     else:
         for name, param in vla.named_parameters():
             if "action_queries" in name:
@@ -911,6 +962,10 @@ def finetune(cfg: FinetuneConfig) -> None:
         if cfg.resume:
             state_dict = load_checkpoint("vision_backbone", cfg.config_file_path, cfg.resume_step)
             vla.model.vision_backbone.load_state_dict(state_dict)
+        elif cfg.lpft_path is not None:
+            resume_step = int(cfg.lpft_path.split("--")[-1].split("_chkpt")[0])
+            lpft_state_dict = load_checkpoint("vision_backbone", cfg.lpft_path, resume_step)
+            vla.model.vision_backbone.load_state_dict(lpft_state_dict, strict=False)
         vla.model.vision_backbone = vla.model.vision_backbone.to(device_id)
 
     # Wrap VLA with DDP
