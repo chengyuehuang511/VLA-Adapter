@@ -18,7 +18,8 @@ if PROJECT_ROOT not in sys.path:
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Type
+from typing import Dict, Optional, Tuple, Type, List
+from dataclasses import field
 import torch.nn.functional as F
 import draccus
 import torch
@@ -115,6 +116,7 @@ class FinetuneConfig:
     diffusion_sample_freq: int = 50                  # (When `use_diffusion==True`) Frequency for sampling in steps
     optimizer: str = "AdamW"                         # Optimizer to use (AdamW or SPD)
     weight_decay: float = 0                          # Weight decay for optimizer (only applied to non-bias and non-LayerNorm params)
+    robust_ft_layers: List[str] = field(default_factory=list) # layers to be robustly fine-tuned, e.g., ["q_proj", "v_proj", "k_proj", "o_proj", "up_proj", "down_proj", "fc1", "fc2"]
 
     # LoRA
     use_lora: bool = False                           # If True, uses LoRA fine-tuning
@@ -131,6 +133,7 @@ class FinetuneConfig:
     freeze_language: bool = False                    # If True, freeze all parameters of the language model except action queries.
     unfreeze_last_llm_layer: bool = False            # If True, unfreeze the last transformer layer of the language model.
     freeze_vision: bool = False                      # If True, freeze all parameters of the vision backbone.
+    freeze_dino: bool = False                        # If True, freeze all parameters of the dino backbone.
     lpft_path: Optional[str] = None                  # load action head etc from lpft checkpoint
 
     # Logging
@@ -205,16 +208,22 @@ def get_run_id(cfg) -> str:
             run_id += f"+frozen+dropout-{cfg.lora_dropout}"
         if cfg.freeze_vlm:
             run_id += f"+freeze_vlm"
+            if cfg.unfreeze_last_llm_layer:
+                run_id += f"+unfreeze_last_llm_layer"
         if cfg.freeze_language:
             if cfg.unfreeze_last_llm_layer:
                 run_id += f"+unfreeze_last_llm_layer"
             run_id += f"+freeze_language"
         if cfg.freeze_vision:
             run_id += f"+freeze_vision"
+        if cfg.freeze_dino:
+            run_id += f"+freeze_dino"
         if cfg.lpft_path is not None:
             run_id += f"+lpft"
         if cfg.use_lora:
             run_id += f"+lora-r{cfg.lora_rank}+dropout-{cfg.lora_dropout}"
+        if cfg.robust_ft_layers:
+            run_id += f"+robust_ft_layers-{'_'.join(cfg.robust_ft_layers)}"
         if cfg.image_aug:
             run_id += "--image_aug"
         if cfg.run_id_note is not None:
@@ -908,14 +917,23 @@ def finetune(cfg: FinetuneConfig) -> None:
                 param.requires_grad = True
         vla.print_trainable_parameters()
     
-    elif cfg.freeze_vlm:
+    if cfg.freeze_vlm:
         for name, param in vla.named_parameters():
             if "action_queries" in name:
                 param.requires_grad = True
             else:
                 param.requires_grad = False
         print("Freezing all parameters of the model except action queries.")
-    elif cfg.freeze_language:
+
+        if cfg.unfreeze_last_llm_layer:
+            # Unfreeze final LLM layer
+            last_layer = (vla.language_model.model.embed_tokens, vla.language_model.model.layers[-1], vla.language_model.lm_head)
+            for module in last_layer:
+                print(f"Unfreezing parameter: {module}")
+                module.requires_grad_(True)
+            print("Unfreezing the last layer of the language model.")
+
+    if cfg.freeze_language:
         for name, param in vla.named_parameters():
             if "action_queries" in name:
                 param.requires_grad = True
@@ -931,7 +949,8 @@ def finetune(cfg: FinetuneConfig) -> None:
                 print(f"Unfreezing parameter: {module}")
                 module.requires_grad_(True)
             print("Unfreezing the last layer of the language model.")
-    elif cfg.freeze_vision:
+    
+    if cfg.freeze_vision:
         for name, param in vla.named_parameters():
             if "action_queries" in name:
                 param.requires_grad = True
@@ -939,7 +958,17 @@ def finetune(cfg: FinetuneConfig) -> None:
                 print(f"Freezing parameter: {name}")
                 param.requires_grad = False
         print("Freezing all parameters of the vision backbone.")
-    else:
+    
+    if cfg.freeze_dino:
+        for name, param in vla.named_parameters():
+            if "action_queries" in name:
+                param.requires_grad = True
+            elif "vision_backbone.featurizer" in name:
+                print(f"Freezing parameter: {name}")
+                param.requires_grad = False
+        print("Freezing all parameters of the DINO featurizer.")
+
+    if not (cfg.freeze_vlm or cfg.freeze_language or cfg.freeze_vision or cfg.freeze_dino or cfg.use_lora):
         for name, param in vla.named_parameters():
             if "action_queries" in name:
                 param.requires_grad = True
@@ -1021,13 +1050,25 @@ def finetune(cfg: FinetuneConfig) -> None:
             if not param.requires_grad:
                 continue
 
-            # Check on any parameters with fewer than 2 dimensions or with "bias" in the name
-            if param.ndim <= 1 or name.endswith(".bias") or "action_queries" in name:
-                if "action_queries" in name:
-                    print(f"Excluding {name} from weight decay")
-                no_decay.append(param)
+            # Use robust_ft_layers if provided: match -> decay, otherwise -> no_decay.
+            robust_layers = getattr(cfg, "robust_ft_layers", []) or []
+            if len(robust_layers) > 0:
+                matches_robust = any(sub in name for sub in robust_layers)
+                if matches_robust and not (name.endswith(".bias") or "action_queries" in name):
+                    print(f"Applying weight decay to {name}")
+                    decay.append(param)
+                else:
+                    if "action_queries" in name:
+                        print(f"Excluding {name} from weight decay")
+                    no_decay.append(param)
             else:
-                decay.append(param)
+                # Original behavior: exclude 1D params, biases, and action_queries from weight decay
+                if param.ndim <= 1 or name.endswith(".bias") or "action_queries" in name:
+                    if "action_queries" in name:
+                        print(f"Excluding {name} from weight decay")
+                    no_decay.append(param)
+                else:
+                    decay.append(param)
         
         # Collect parameters from action head
         if action_head is not None:
@@ -1270,6 +1311,11 @@ def finetune(cfg: FinetuneConfig) -> None:
             if log_step == cfg.max_steps:
                 print(f"Max step {cfg.max_steps} reached! Stopping training...")
                 break
+        
+    # And... we're done!
+    print("... and that's all, folks!")
+    dist.barrier()
+    dist.destroy_process_group()
 
 
 if __name__ == "__main__":

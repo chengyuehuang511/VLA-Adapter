@@ -159,3 +159,7 @@ results/
 runs/
 data/
 pretrained_models/
+pretrained/
+vq/
+side_exp/
+calvin/
