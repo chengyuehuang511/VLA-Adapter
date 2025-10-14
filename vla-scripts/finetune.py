@@ -80,7 +80,7 @@ class FinetuneConfig:
     config_file_path: str = "openvla/openvla-7b"     # Path to necessary config files of LA-Adapter
     vlm_path: str = "openvla/openvla-7b"             # Path to OpenVLA model (on HuggingFace Hub or stored locally)
     use_minivlm: bool = False                        # 
-    resum_vla_path: str = "openvla/openvla-7b"       # Path to OpenVLA model (on HuggingFace Hub or stored locally)
+    resume_vla_path: str = "openvla/openvla-7b"       # Path to OpenVLA model (on HuggingFace Hub or stored locally)
 
     # Dataset
     data_root_dir: Path = Path("datasets/rlds")      # Directory containing RLDS datasets
@@ -132,6 +132,7 @@ class FinetuneConfig:
                                                      #   Note: cannot be used together with `use_lora`
     freeze_language: bool = False                    # If True, freeze all parameters of the language model except action queries.
     unfreeze_last_llm_layer: bool = False            # If True, unfreeze the last transformer layer of the language model.
+    robust_ft_early_llm_layers: bool = False         # If True, robustly fine-tune the early layers of the language model.
     freeze_vision: bool = False                      # If True, freeze all parameters of the vision backbone.
     freeze_dino: bool = False                        # If True, freeze all parameters of the dino backbone.
     lpft_path: Optional[str] = None                  # load action head etc from lpft checkpoint
@@ -224,6 +225,8 @@ def get_run_id(cfg) -> str:
             run_id += f"+lora-r{cfg.lora_rank}+dropout-{cfg.lora_dropout}"
         if cfg.robust_ft_layers:
             run_id += f"+robust_ft_layers-{'_'.join(cfg.robust_ft_layers)}"
+            if cfg.robust_ft_early_llm_layers:
+                run_id += f"_early_llm_layers"
         if cfg.image_aug:
             run_id += "--image_aug"
         if cfg.run_id_note is not None:
@@ -313,7 +316,7 @@ def init_module(
     count_parameters(module, module_name)
 
     if cfg.resume:
-        state_dict = load_checkpoint(module_name, cfg.resum_vla_path, cfg.resume_step)
+        state_dict = load_checkpoint(module_name, cfg.resume_vla_path, cfg.resume_step)
         module.load_state_dict(state_dict)
         print('loaded!!!!!!!!!')
     if cfg.lpft_path is not None:
@@ -1046,14 +1049,40 @@ def finetune(cfg: FinetuneConfig) -> None:
     else:
         decay, no_decay = [], []
                 
+        # Identify early LLM layer name prefixes if robust_ft_early_llm_layers is enabled
+        # last_layer = (vla.language_model.model.embed_tokens, vla.language_model.model.layers[-1], vla.language_model.lm_head)
+        early_llm_prefixes = []
+        if getattr(cfg, "robust_ft_early_llm_layers", False):
+            if (
+                hasattr(vla.module, "language_model") and
+                hasattr(vla.module.language_model, "model") and
+                hasattr(vla.module.language_model.model, "layers")
+            ):
+                try:
+                    layers_ref = vla.module.language_model.model.layers
+                    num_llm_layers = len(layers_ref)
+                    if num_llm_layers > 1:
+                        # Use all transformer layer prefixes except the last layer
+                        early_llm_prefixes = [f"language_model.model.layers.{i}." for i in range(num_llm_layers - 1)]
+                        print(
+                            f"[robust_ft_early_llm_layers] Early layers (decay): 0..{num_llm_layers-2}; excluded last layer index {num_llm_layers-1}."
+                        )
+                except Exception as e:
+                    print(f"[robust_ft_early_llm_layers] Failed to enumerate layers: {e}")
+
         for name, param in vla.module.named_parameters():
             if not param.requires_grad:
                 continue
 
             # Use robust_ft_layers if provided: match -> decay, otherwise -> no_decay.
             robust_layers = getattr(cfg, "robust_ft_layers", []) or []
-            if len(robust_layers) > 0:
-                matches_robust = any(sub in name for sub in robust_layers)
+            matches_robust = any(sub in name for sub in robust_layers)
+            # Early LLM layers (except last) also go to decay if flag enabled
+            if early_llm_prefixes and any(pref in name for pref in early_llm_prefixes):
+                matches_robust = True
+                # Optional: debug print (only once per param)
+                # print(f"[robust_ft_early_llm_layers] Forcing decay: {name}")
+            if len(robust_layers) > 0 or early_llm_prefixes:
                 if matches_robust and not (name.endswith(".bias") or "action_queries" in name):
                     print(f"Applying weight decay to {name}")
                     decay.append(param)
