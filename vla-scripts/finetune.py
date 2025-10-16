@@ -1064,6 +1064,7 @@ def finetune(cfg: FinetuneConfig) -> None:
             exclude_set = set()
         if cfg.weight_decay_scheduler == "constant":
             decay, no_decay = [], []
+            decay_names, no_decay_names = [], []
                     
             # Identify early LLM layer name prefixes if robust_ft_early_llm_layers is enabled
             # last_layer = (vla.language_model.model.embed_tokens, vla.language_model.model.layers[-1], vla.language_model.lm_head)
@@ -1102,17 +1103,21 @@ def finetune(cfg: FinetuneConfig) -> None:
                     if matches_robust and not (name.endswith(".bias") or "action_queries" in name):
                         print(f"Applying weight decay to {name}")
                         decay.append(param)
+                        decay_names.append(name)
                     else:
                         if "action_queries" in name:
                             if cfg.optimizer == "FTP":
                                 exclude_set.add(name)
                                 decay.append(param)
+                                decay_names.append(name)
                                 print(f"Excluding {name} from optimizer (FTP)")
                             else:
                                 no_decay.append(param)
+                                no_decay_names.append(name)
                                 print(f"Excluding {name} from weight decay")
                         else:
                             no_decay.append(param)
+                            no_decay_names.append(name)
                             print(f"Excluding {name} from weight decay")
                 else:
                     # Original behavior: exclude 1D params, biases, and action_queries from weight decay
@@ -1121,15 +1126,19 @@ def finetune(cfg: FinetuneConfig) -> None:
                             if cfg.optimizer == "FTP":
                                 exclude_set.add(name)
                                 decay.append(param)
+                                decay_names.append(name)
                                 print(f"Excluding {name} from optimizer (FTP)")
                             else:
                                 no_decay.append(param)
+                                no_decay_names.append(name)
                                 print(f"Excluding {name} from weight decay")
                         else:
                             no_decay.append(param)
+                            no_decay_names.append(name)
                             print(f"Excluding {name} from weight decay")
                     else:
                         decay.append(param)
+                        decay_names.append(name)
         
         elif cfg.weight_decay_scheduler == "layerwise_decay":
             import re
@@ -1140,7 +1149,9 @@ def finetune(cfg: FinetuneConfig) -> None:
 
             # Collectors
             layerwise_wd_to_params = defaultdict(list)
+            layerwise_wd_to_names = defaultdict(list)
             no_decay = []
+            no_decay_names = []
 
             # Exclusions
             EXCLUDE_SUBSTRS = ("action_queries",)
@@ -1171,6 +1182,8 @@ def finetune(cfg: FinetuneConfig) -> None:
                     continue
                 if is_excluded(name):
                     no_decay.append(p)
+                    no_decay_names.append(name)
+                    print(f"Excluding {name} from weight decay")
                     continue
                 layer_key = first_numeric_layer_key(name)
                 params_buffer.append((name, p, layer_key))
@@ -1199,22 +1212,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                 wd_value = max(0.0, min(1.0, wd_value))  # clamp safety
 
                 layerwise_wd_to_params[wd_value].append(p)
-
-            # Build optimizer groups:
-            #   - one zero-decay group for excluded params (bias & action_queries)
-            #   - one group per wd_value
-            param_groups = []
-            if no_decay:
-                param_groups.append(
-                    {"params": no_decay, "weight_decay": 0.0}
-                )
-            for wd_value, params in layerwise_wd_to_params.items():
-                if not params:
-                    continue
-                param_groups.append(
-                    {"params": params, "weight_decay": wd_value}
-                )
-            print(f"Layer-wise decay param groups: {[ (len(g['params']), g['weight_decay']) for g in param_groups ]}")
+                layerwise_wd_to_names[wd_value].append(name)
 
         
         # Collect parameters from action head
@@ -1225,9 +1223,11 @@ def finetune(cfg: FinetuneConfig) -> None:
                 if cfg.optimizer == "FTP":
                     exclude_set.add(name)
                     decay.append(param)
+                    decay_names.append(name)
                     print(f"Excluding {name} from optimizer (FTP)")
                 else:
                     no_decay.append(param)
+                    no_decay_names.append(name)
                     print(f"Excluding {name} from weight decay")
 
         # Collect parameters from proprio projector
@@ -1238,9 +1238,11 @@ def finetune(cfg: FinetuneConfig) -> None:
                 if cfg.optimizer == "FTP":
                     exclude_set.add(name)
                     decay.append(param)
+                    decay_names.append(name)
                     print(f"Excluding {name} from optimizer (FTP)")
                 else:
                     no_decay.append(param)
+                    no_decay_names.append(name)
                     print(f"Excluding {name} from weight decay")
         
         # Build Parameter Groups
@@ -1252,7 +1254,8 @@ def finetune(cfg: FinetuneConfig) -> None:
             if no_decay:
                 groups.append({
                     "params": no_decay,
-                    "weight_decay": 0.0
+                    "weight_decay": 0.0,
+                    "name": no_decay_names,
                 })
 
             # Add one group per unique layer weight decay value
@@ -1265,6 +1268,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                     # "weight_decay": wd_value,
                     # Option 2: scale by cfg.weight_decay if you want same base strength per layer
                     "weight_decay": wd_value * cfg.weight_decay,
+                    "name": layerwise_wd_to_names[wd_value],
                 })
             
             # Deepcopy all group params to serve as "anchors"
@@ -1277,8 +1281,9 @@ def finetune(cfg: FinetuneConfig) -> None:
                 g["pre"] = params_anchor
 
         else:
-            groups = [{"params": decay, "weight_decay": cfg.weight_decay}, {"params": no_decay, "weight_decay": 0.0}]
-        
+            groups = [{"params": decay, "weight_decay": cfg.weight_decay, "name": decay_names}, 
+                      {"params": no_decay, "weight_decay": 0.0, "name": no_decay_names}]
+
             decay_params_anchor = copy.deepcopy(decay)
             no_decay_params_anchor = copy.deepcopy(no_decay)
             # put decay_params_anchor and no_decay_params_anchor to cpu
@@ -1294,6 +1299,27 @@ def finetune(cfg: FinetuneConfig) -> None:
             optimizer = eval(cfg.optimizer)(groups, lr=cfg.learning_rate)
     
     print("Optimizer:", optimizer)
+
+    def assert_no_duplicates(optimizer):
+        seen = set()
+        for gi, g in enumerate(optimizer.param_groups):
+            for p in g["params"]:
+                pid = id(p)
+                if pid in seen:
+                    raise ValueError(f"Parameter appears in multiple groups (group {gi}).")
+                seen.add(pid)
+        print(f"Verified: {len(seen)} unique parameters in optimizer groups.")
+    
+    # assert that the sum of the number of params in all groups is the same as trainable_params
+    def assert_correct_number(optimizer, trainable_params):
+        num_trainable_params = sum(p.numel() for p in trainable_params)
+        num_params_in_groups = sum(p.numel() for g in optimizer.param_groups for p in g["params"])
+        if num_params_in_groups != num_trainable_params:
+            raise ValueError(f"Number of parameters in optimizer groups ({num_params_in_groups}) does not match number of trainable parameters ({num_trainable_params}).")
+        print(f"Verified: {num_params_in_groups} parameters in optimizer groups matches number of trainable parameters.")
+    
+    assert_no_duplicates(optimizer)
+    assert_correct_number(optimizer, trainable_params)
 
     # Record original learning rate
     original_lr = optimizer.param_groups[0]["lr"]
