@@ -1,2 +1,2 @@
 from .spd import SPD
-from .ftp import FTP
+from .ftp import AdamP

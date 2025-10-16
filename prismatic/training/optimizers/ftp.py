@@ -25,6 +25,8 @@ class FTP(object):
     
     @torch.no_grad()
     def step(self,name, curr, pre, d_p):
+        if name in self.exclude_set:
+            print(f"[Inside FTP] Excluding {name} from FTP")
         if curr.requires_grad and name not in self.exclude_set:
             c_t = (curr - d_p) if pre is None else (curr - d_p) - pre
             norms = self._mars_norm(c_t)

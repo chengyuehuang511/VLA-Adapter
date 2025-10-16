@@ -1060,6 +1060,8 @@ def finetune(cfg: FinetuneConfig) -> None:
         optimizer = AdamW(trainable_params, lr=cfg.learning_rate)
 
     else:
+        if cfg.optimizer == "FTP":
+            exclude_set = set()
         if cfg.weight_decay_scheduler == "constant":
             decay, no_decay = [], []
                     
@@ -1102,14 +1104,30 @@ def finetune(cfg: FinetuneConfig) -> None:
                         decay.append(param)
                     else:
                         if "action_queries" in name:
+                            if cfg.optimizer == "FTP":
+                                exclude_set.add(name)
+                                decay.append(param)
+                                print(f"Excluding {name} from optimizer (FTP)")
+                            else:
+                                no_decay.append(param)
+                                print(f"Excluding {name} from weight decay")
+                        else:
+                            no_decay.append(param)
                             print(f"Excluding {name} from weight decay")
-                        no_decay.append(param)
                 else:
                     # Original behavior: exclude 1D params, biases, and action_queries from weight decay
                     if param.ndim <= 1 or name.endswith(".bias") or "action_queries" in name:
                         if "action_queries" in name:
+                            if cfg.optimizer == "FTP":
+                                exclude_set.add(name)
+                                decay.append(param)
+                                print(f"Excluding {name} from optimizer (FTP)")
+                            else:
+                                no_decay.append(param)
+                                print(f"Excluding {name} from weight decay")
+                        else:
+                            no_decay.append(param)
                             print(f"Excluding {name} from weight decay")
-                        no_decay.append(param)
                     else:
                         decay.append(param)
         
@@ -1204,14 +1222,26 @@ def finetune(cfg: FinetuneConfig) -> None:
             for name, param in action_head.module.named_parameters():
                 if not param.requires_grad:
                     continue
-                no_decay.append(param)
-        
+                if cfg.optimizer == "FTP":
+                    exclude_set.add(name)
+                    decay.append(param)
+                    print(f"Excluding {name} from optimizer (FTP)")
+                else:
+                    no_decay.append(param)
+                    print(f"Excluding {name} from weight decay")
+
         # Collect parameters from proprio projector
         if proprio_projector is not None:
             for name, param in proprio_projector.module.named_parameters():
                 if not param.requires_grad:
                     continue
-                no_decay.append(param)
+                if cfg.optimizer == "FTP":
+                    exclude_set.add(name)
+                    decay.append(param)
+                    print(f"Excluding {name} from optimizer (FTP)")
+                else:
+                    no_decay.append(param)
+                    print(f"Excluding {name} from weight decay")
         
         # Build Parameter Groups
         if cfg.weight_decay_scheduler == "layerwise_decay":
@@ -1259,7 +1289,7 @@ def finetune(cfg: FinetuneConfig) -> None:
 
         # Create Optimizer & LR Scheduler
         if cfg.optimizer == "FTP":
-            optimizer = AdamP(groups, lr=cfg.learning_rate, k=cfg.ftp_k)
+            optimizer = AdamP(groups, lr=cfg.learning_rate, k=cfg.ftp_k, exclude_set=exclude_set)
         else:
             optimizer = eval(cfg.optimizer)(groups, lr=cfg.learning_rate)
     
