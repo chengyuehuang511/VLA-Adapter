@@ -11,7 +11,7 @@ from pathlib import Path
 # sys.path.insert(0, '/root/RoboDual')
 import time
 import copy
-from moviepy.editor import ImageSequenceClip
+from moviepy import ImageSequenceClip
 from accelerate import Accelerator
 from datetime import timedelta
 from accelerate.utils import InitProcessGroupKwargs
@@ -46,7 +46,7 @@ from termcolor import colored
 import torch
 from tqdm.auto import tqdm
 
-from vla_evaluation import DualSystemCalvinEvaluation
+from vla_scripts.vla_evaluation import DualSystemCalvinEvaluation
 
 from experiments.robot.openvla_utils import (
     get_action_head,
@@ -197,7 +197,7 @@ def print_and_save(results, sequences, eval_result_path, task_name=None, epoch=N
 
 def make_env(dataset_path, observation_space, device):
     val_folder = Path(dataset_path) / "validation"
-    from calvin_env_wrapper import CalvinEnvWrapperRaw
+    from vla_scripts.calvin_env_wrapper import CalvinEnvWrapperRaw
     env = CalvinEnvWrapperRaw(val_folder, observation_space, device)
     return env
 
@@ -385,7 +385,7 @@ import os
 import time
 import copy
 import numpy as np
-from moviepy.editor import ImageSequenceClip
+from moviepy import ImageSequenceClip
 from termcolor import colored
 
 
