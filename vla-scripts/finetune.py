@@ -67,7 +67,7 @@ from prismatic.vla.constants import (
 from prismatic.vla.datasets import RLDSDataset, RLDSBatchTransform
 from prismatic.vla.datasets.rlds.utils.data_utils import save_dataset_statistics
 from prismatic.models import load, load_vla
-from prismatic.training.optimizers import SPD
+from prismatic.training.optimizers import *
 
 
 
@@ -116,6 +116,8 @@ class FinetuneConfig:
     diffusion_sample_freq: int = 50                  # (When `use_diffusion==True`) Frequency for sampling in steps
     optimizer: str = "AdamW"                         # Optimizer to use (AdamW or SPD)
     weight_decay: float = 0                          # Weight decay for optimizer (only applied to non-bias and non-LayerNorm params)
+    weight_decay_scheduler: str = "constant"         # Weight decay scheduling: "constant" or "layerwise_decay"
+    ftp_k: int = 1                                   # (When `optimizer==FTP`) The k value for FTP optimizer
     robust_ft_layers: List[str] = field(default_factory=list) # layers to be robustly fine-tuned, e.g., ["q_proj", "v_proj", "k_proj", "o_proj", "up_proj", "down_proj", "fc1", "fc2"]
 
     # LoRA
@@ -205,6 +207,8 @@ def get_run_id(cfg) -> str:
             f"+wd-{cfg.weight_decay}"
             f"+x-action_queries"
         )
+        if cfg.optimizer == "FTP":
+            run_id += f"+k-{cfg.ftp_k}"
         if cfg.use_fz:
             run_id += f"+frozen+dropout-{cfg.lora_dropout}"
         if cfg.freeze_vlm:
@@ -225,8 +229,13 @@ def get_run_id(cfg) -> str:
             run_id += f"+lora-r{cfg.lora_rank}+dropout-{cfg.lora_dropout}"
         if cfg.robust_ft_layers:
             run_id += f"+robust_ft_layers-{'_'.join(cfg.robust_ft_layers)}"
-            if cfg.robust_ft_early_llm_layers:
+        if cfg.robust_ft_early_llm_layers:
+            if cfg.robust_ft_layers: 
                 run_id += f"_early_llm_layers"
+            else:
+                run_id += f"+robust_ft_layers-early_llm_layers"
+        if cfg.weight_decay_scheduler == "layerwise_decay":
+            run_id += f"+layerwise_decay"
         if cfg.image_aug:
             run_id += "--image_aug"
         if cfg.run_id_note is not None:
@@ -624,7 +633,7 @@ def save_training_checkpoint(
 
     # Merge LoRA weights into base model and save resulting model checkpoint
     # Note: Can be very slow on some devices; if so, we recommend merging offline
-    if cfg.use_lora and cfg.merge_lora_during_training:
+    if cfg.use_lora and cfg.merge_lora_during_training and log_step == cfg.max_steps:
         if distributed_state.is_main_process:
             print("[merge] Offloading training model to CPU to free GPU memory...")
 
@@ -1003,6 +1012,10 @@ def finetune(cfg: FinetuneConfig) -> None:
     # Wrap VLA with DDP
     vla = wrap_ddp(vla, device_id, find_unused=True)
 
+    # Initialize optional modules
+    action_head = None
+    proprio_projector = None
+
     # If applicable, instantiate proprio projector
     if cfg.use_proprio:
         proprio_projector = init_module(
@@ -1047,57 +1060,144 @@ def finetune(cfg: FinetuneConfig) -> None:
         optimizer = AdamW(trainable_params, lr=cfg.learning_rate)
 
     else:
-        decay, no_decay = [], []
-                
-        # Identify early LLM layer name prefixes if robust_ft_early_llm_layers is enabled
-        # last_layer = (vla.language_model.model.embed_tokens, vla.language_model.model.layers[-1], vla.language_model.lm_head)
-        early_llm_prefixes = []
-        if getattr(cfg, "robust_ft_early_llm_layers", False):
-            if (
-                hasattr(vla.module, "language_model") and
-                hasattr(vla.module.language_model, "model") and
-                hasattr(vla.module.language_model.model, "layers")
-            ):
-                try:
-                    layers_ref = vla.module.language_model.model.layers
-                    num_llm_layers = len(layers_ref)
-                    if num_llm_layers > 1:
-                        # Use all transformer layer prefixes except the last layer
-                        early_llm_prefixes = [f"language_model.model.layers.{i}." for i in range(num_llm_layers - 1)]
-                        print(
-                            f"[robust_ft_early_llm_layers] Early layers (decay): 0..{num_llm_layers-2}; excluded last layer index {num_llm_layers-1}."
-                        )
-                except Exception as e:
-                    print(f"[robust_ft_early_llm_layers] Failed to enumerate layers: {e}")
+        if cfg.weight_decay_scheduler == "constant":
+            decay, no_decay = [], []
+                    
+            # Identify early LLM layer name prefixes if robust_ft_early_llm_layers is enabled
+            # last_layer = (vla.language_model.model.embed_tokens, vla.language_model.model.layers[-1], vla.language_model.lm_head)
+            early_llm_prefixes = []
+            if getattr(cfg, "robust_ft_early_llm_layers", False):
+                if (
+                    hasattr(vla.module, "language_model") and
+                    hasattr(vla.module.language_model, "model") and
+                    hasattr(vla.module.language_model.model, "layers")
+                ):
+                    try:
+                        layers_ref = vla.module.language_model.model.layers
+                        num_llm_layers = len(layers_ref)
+                        if num_llm_layers > 1:
+                            # Use all transformer layer prefixes except the last layer
+                            early_llm_prefixes = [f"language_model.model.layers.{i}." for i in range(num_llm_layers - 1)]
+                            print(
+                                f"[robust_ft_early_llm_layers] Early layers (decay): 0..{num_llm_layers-2}; excluded last layer index {num_llm_layers-1}."
+                            )
+                    except Exception as e:
+                        print(f"[robust_ft_early_llm_layers] Failed to enumerate layers: {e}")
 
-        for name, param in vla.module.named_parameters():
-            if not param.requires_grad:
-                continue
+            for name, param in vla.module.named_parameters():
+                if not param.requires_grad:
+                    continue
 
-            # Use robust_ft_layers if provided: match -> decay, otherwise -> no_decay.
-            robust_layers = getattr(cfg, "robust_ft_layers", []) or []
-            matches_robust = any(sub in name for sub in robust_layers)
-            # Early LLM layers (except last) also go to decay if flag enabled
-            if early_llm_prefixes and any(pref in name for pref in early_llm_prefixes):
-                matches_robust = True
-                # Optional: debug print (only once per param)
-                # print(f"[robust_ft_early_llm_layers] Forcing decay: {name}")
-            if len(robust_layers) > 0 or early_llm_prefixes:
-                if matches_robust and not (name.endswith(".bias") or "action_queries" in name):
-                    print(f"Applying weight decay to {name}")
-                    decay.append(param)
+                # Use robust_ft_layers if provided: match -> decay, otherwise -> no_decay.
+                robust_layers = getattr(cfg, "robust_ft_layers", []) or []
+                matches_robust = any(sub in name for sub in robust_layers)
+                # Early LLM layers (except last) also go to decay if flag enabled
+                if early_llm_prefixes and any(pref in name for pref in early_llm_prefixes):
+                    matches_robust = True
+                    # Optional: debug print (only once per param)
+                    # print(f"[robust_ft_early_llm_layers] Forcing decay: {name}")
+                if len(robust_layers) > 0 or early_llm_prefixes:
+                    if matches_robust and not (name.endswith(".bias") or "action_queries" in name):
+                        print(f"Applying weight decay to {name}")
+                        decay.append(param)
+                    else:
+                        if "action_queries" in name:
+                            print(f"Excluding {name} from weight decay")
+                        no_decay.append(param)
                 else:
-                    if "action_queries" in name:
-                        print(f"Excluding {name} from weight decay")
-                    no_decay.append(param)
-            else:
-                # Original behavior: exclude 1D params, biases, and action_queries from weight decay
-                if param.ndim <= 1 or name.endswith(".bias") or "action_queries" in name:
-                    if "action_queries" in name:
-                        print(f"Excluding {name} from weight decay")
-                    no_decay.append(param)
+                    # Original behavior: exclude 1D params, biases, and action_queries from weight decay
+                    if param.ndim <= 1 or name.endswith(".bias") or "action_queries" in name:
+                        if "action_queries" in name:
+                            print(f"Excluding {name} from weight decay")
+                        no_decay.append(param)
+                    else:
+                        decay.append(param)
+        
+        elif cfg.weight_decay_scheduler == "layerwise_decay":
+            import re
+            from collections import OrderedDict, defaultdict
+
+            # Helper: get the module root (handles DDP-wrapped models)
+            root = vla.module if hasattr(vla, "module") else vla
+
+            # Collectors
+            layerwise_wd_to_params = defaultdict(list)
+            no_decay = []
+
+            # Exclusions
+            EXCLUDE_SUBSTRS = ("action_queries",)
+            def is_excluded(name: str) -> bool:
+                if name.endswith(".bias"):
+                    return True
+                return any(s in name for s in EXCLUDE_SUBSTRS)
+
+            # Parse the "first numeric segment" from a dotted param name.
+            # Returns a layer key string like "vision_backbone.featurizer.blocks.7"
+            # or None if no numeric segment exists.
+            def first_numeric_layer_key(param_name: str):
+                # Split tokens: e.g., ['vision_backbone','featurizer','blocks','7','attn','qkv','weight']
+                toks = param_name.split(".")
+                for i, t in enumerate(toks):
+                    if t.isdigit():
+                        # Use the prefix including this index as a stable layer key
+                        # (keeps branches distinct: layers.3 vs blocks.3)
+                        return ".".join(toks[:i+1])  # up to and including the index
+                return None
+
+            # First pass: build a stable global ordering of layer keys
+            layer_key_order = OrderedDict()
+            params_buffer = []  # (name, param, layer_key or None)
+
+            for name, p in root.named_parameters():
+                if not p.requires_grad:
+                    continue
+                if is_excluded(name):
+                    no_decay.append(p)
+                    continue
+                layer_key = first_numeric_layer_key(name)
+                params_buffer.append((name, p, layer_key))
+                if layer_key is not None and layer_key not in layer_key_order:
+                    layer_key_order[layer_key] = None  # value filled later
+
+            # Assign indices to layer keys in discovery order
+            for idx, k in enumerate(layer_key_order.keys()):
+                layer_key_order[k] = idx
+
+            # Decide how many layers there are globally
+            # + 1 bucket for params without any numeric segment (they go to the "last" layer)
+            num_indexed_layers = len(layer_key_order)
+            total_layers = max(1, num_indexed_layers + 1)
+
+            # Second pass: compute wd and bucket params
+            for name, p, layer_key in params_buffer:
+                if layer_key is None:
+                    # No numeric segment → push to last bucket
+                    layer_idx = total_layers - 1
                 else:
-                    decay.append(param)
+                    layer_idx = layer_key_order[layer_key]
+
+                # weight decay = 1 - i/N  (i in [0..N-1])
+                wd_value = 1.0 - (float(layer_idx) / float(total_layers))
+                wd_value = max(0.0, min(1.0, wd_value))  # clamp safety
+
+                layerwise_wd_to_params[wd_value].append(p)
+
+            # Build optimizer groups:
+            #   - one zero-decay group for excluded params (bias & action_queries)
+            #   - one group per wd_value
+            param_groups = []
+            if no_decay:
+                param_groups.append(
+                    {"params": no_decay, "weight_decay": 0.0}
+                )
+            for wd_value, params in layerwise_wd_to_params.items():
+                if not params:
+                    continue
+                param_groups.append(
+                    {"params": params, "weight_decay": wd_value}
+                )
+            print(f"Layer-wise decay param groups: {[ (len(g['params']), g['weight_decay']) for g in param_groups ]}")
+
         
         # Collect parameters from action head
         if action_head is not None:
@@ -1114,18 +1214,54 @@ def finetune(cfg: FinetuneConfig) -> None:
                 no_decay.append(param)
         
         # Build Parameter Groups
-        groups = [{"params": decay, "weight_decay": cfg.weight_decay}, {"params": no_decay, "weight_decay": 0.0}]
+        if cfg.weight_decay_scheduler == "layerwise_decay":
+            # Build optimizer groups for layer-wise weight decay
+            groups = []
+
+            # Add no-decay group for biases and excluded parameters
+            if no_decay:
+                groups.append({
+                    "params": no_decay,
+                    "weight_decay": 0.0
+                })
+
+            # Add one group per unique layer weight decay value
+            for wd_value, params in sorted(layerwise_wd_to_params.items(), key=lambda x: x[0], reverse=True):
+                if not params:
+                    continue
+                groups.append({
+                    "params": params,
+                    # Option 1: use wd_value directly (decay in [0,1])
+                    # "weight_decay": wd_value,
+                    # Option 2: scale by cfg.weight_decay if you want same base strength per layer
+                    "weight_decay": wd_value * cfg.weight_decay,
+                })
+            
+            # Deepcopy all group params to serve as "anchors"
+            for g in groups:
+                params_anchor = copy.deepcopy(g["params"])
+                # Optionally move to CPU to save GPU memory
+                # (uncomment if your SPD optimizer expects 'pre' to live on CPU)
+                # for p in params_anchor:
+                #     p.data = p.data.cpu()
+                g["pre"] = params_anchor
+
+        else:
+            groups = [{"params": decay, "weight_decay": cfg.weight_decay}, {"params": no_decay, "weight_decay": 0.0}]
         
-        decay_params_anchor = copy.deepcopy(decay)
-        no_decay_params_anchor = copy.deepcopy(no_decay)
-        # put decay_params_anchor and no_decay_params_anchor to cpu
-        # for p in decay_params_anchor + no_decay_params_anchor:
-        #     p.data = p.data.cpu()
-        groups[0]["pre"] = decay_params_anchor
-        groups[1]["pre"] = no_decay_params_anchor
+            decay_params_anchor = copy.deepcopy(decay)
+            no_decay_params_anchor = copy.deepcopy(no_decay)
+            # put decay_params_anchor and no_decay_params_anchor to cpu
+            # for p in decay_params_anchor + no_decay_params_anchor:
+            #     p.data = p.data.cpu()
+            groups[0]["pre"] = decay_params_anchor
+            groups[1]["pre"] = no_decay_params_anchor
 
         # Create Optimizer & LR Scheduler
-        optimizer = eval(cfg.optimizer)(groups, lr=cfg.learning_rate)
+        if cfg.optimizer == "FTP":
+            optimizer = AdamP(groups, lr=cfg.learning_rate, k=cfg.ftp_k)
+        else:
+            optimizer = eval(cfg.optimizer)(groups, lr=cfg.learning_rate)
     
     print("Optimizer:", optimizer)
 

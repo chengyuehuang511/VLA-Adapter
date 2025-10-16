@@ -6,7 +6,7 @@
 #SBATCH --gpus-per-node="a40:8"
 #SBATCH --qos="short"
 #SBATCH --mem-per-gpu=45G
-#SBATCH -x xaea-12,dave,randotron
+#SBATCH -x xaea-12,dave,randotron,nestor,cheetah
 
 export HOME="/coc/testnvme/chuang475"
 export CONDA_BASE_PATH="${HOME}/miniconda3"
@@ -22,10 +22,10 @@ num_gpus=8
 num_processes=32
 task_suite_names=(
     "libero_90"
-    # "libero_goal"
-    # "libero_object"
-    # "libero_spatial"
-    # "libero_10"
+    "libero_goal"
+    "libero_object"
+    "libero_spatial"
+    "libero_10"
 )
 
 # name="runs/VLA-Adapter/LIBERO-Long-Pro"
@@ -34,10 +34,30 @@ task_suite_names=(
 # name="runs/VLA-Adapter/LIBERO-Spatial-Pro"
 # name="outputs/configs+libero_object_no_noops+b8+lr-0.0002+lora-r64+dropout-0.0--image_aug--VLA-Adapter--object----5000_chkpt"
 # name="outputs/configs+libero_90_no_noops+b8+lr-0.0002--image_aug--VLA-Adapter--90----50000_chkpt"
-# name="outputs/configs+libero_90_no_noops+b8+lr-1e-05--image_aug--VLA-Adapter--90----50000_chkpt"
+# name="outputs/configs+libero_90_no_noops+b8+lr-1e-05--image_aug--VLA-Adapter--90----50000_chkpt" # 1
 # name="outputs/configs+libero_90_no_noops+b8+lr-1e-05--VLA-Adapter--90----50000_chkpt"
+# name="outputs/configs+libero_90_no_noops+b8+lr-0.0001+AdamW+wd-0.0+x-action_queries--image_aug--VLA-Adapter--90----50000_chkpt" # 2
 # name="outputs/configs+libero_90_no_noops+b8+lr-1e-05+SPD+wd-1.0--image_aug--VLA-Adapter--90----50000_chkpt"
-name="outputs/configs+libero_90_no_noops+b8+lr-1e-05+SPD+wd-3.0+x-action_queries--image_aug--VLA-Adapter--90----50000_chkpt"
+# name="outputs/configs+libero_90_no_noops+b8+lr-1e-05+SPD+wd-2.0+x-action_queries--image_aug--VLA-Adapter--90----50000_chkpt"
+# name="outputs/configs+libero_90_no_noops+b8+lr-1e-05+SPD+wd-0.7+x-action_queries--image_aug--VLA-Adapter--90----50000_chkpt" # 8
+# name="outputs/configs+libero_90_no_noops+b8+lr-0.0001+AdamW+wd-0.0+x-action_queries+freeze_vlm--image_aug--VLA-Adapter--90----50000_chkpt" # 3
+# name="outputs/configs+libero_90_no_noops+b8+lr-0.0001+AdamW+wd-0.0+x-action_queries+freeze_vision--image_aug--VLA-Adapter--90----50000_chkpt" # 4
+# name="outputs/configs+libero_90_no_noops+b8+lr-0.0001+AdamW+wd-0.0+x-action_queries+freeze_language--image_aug--VLA-Adapter--90----50000_chkpt" # 5
+#  name="outputs/configs+libero_90_no_noops+b8+lr-1e-05+AdamW+wd-0.0+x-action_queries+lpft--image_aug--VLA-Adapter--90----50000_chkpt" # 6
+# name="outputs/configs+libero_90_no_noops+b8+lr-0.0001+AdamW+wd-0.0+x-action_queries+unfreeze_last_llm_layer+freeze_language--image_aug--VLA-Adapter--90----50000_chkpt" # 7
+
+# name="outputs/configs+libero_90_no_noops+b8+lr-0.0001+AdamW+wd-0.0+x-action_queries+freeze_vlm+unfreeze_last_llm_layer--image_aug--VLA-Adapter--90----50000_chkpt"
+# name="outputs/configs+libero_90_no_noops+b8+lr-0.0001+AdamW+wd-0.0+x-action_queries+unfreeze_last_llm_layer+freeze_language+freeze_vision--image_aug--VLA-Adapter--90----50000_chkpt"
+# name="outputs/configs+libero_90_no_noops+b8+lr-0.0001+AdamW+wd-0.0+x-action_queries+unfreeze_last_llm_layer+freeze_language+freeze_dino--image_aug--VLA-Adapter--90----50000_chkpt"
+
+name="output_flash6/configs+libero_90_no_noops+b8+lr-0.0001+SPD+wd-0.7+x-action_queries--image_aug--VLA-Adapter--90----45000_chkpt"
+# name="output_flash6/configs+libero_90_no_noops+b8+lr-0.0001+SPD+wd-0.7+x-action_queries+freeze_vision--image_aug--VLA-Adapter--90----50000_chkpt"
+# name="output_flash6/configs+libero_90_no_noops+b8+lr-0.0001+SPD+wd-0.7+x-action_queries+robust_ft_layers-language_model--image_aug--VLA-Adapter--90----50000_chkpt"
+# name="output_flash6/configs+libero_90_no_noops+b8+lr-0.0001+SPD+wd-0.7+x-action_queries+robust_ft_layers-vision_backbone--image_aug--VLA-Adapter--90----45000_chkpt"
+# name="output_flash6/configs+libero_90_no_noops+b8+lr-0.0001+SPD+wd-0.7+x-action_queries+robust_ft_layers-vision_backbone.featurizer_early_llm_layers--image_aug--VLA-Adapter--90----50000_chkpt"
+# name="output_flash6/configs+libero_90_no_noops+b8+lr-0.0001+SPD+wd-0.7+x-action_queries+unfreeze_last_llm_layer+freeze_language+robust_ft_layers-vision_backbone--image_aug--VLA-Adapter--90----50000_chkpt"
+# name="output_flash6/configs+libero_90_no_noops+b8+lr-0.0001+SPD+wd-0.7+x-action_queries+unfreeze_last_llm_layer+freeze_language+robust_ft_layers-vision_backbone.featurizer--image_aug--VLA-Adapter--90----50000_chkpt"
+
 
 # srun -u ${PYTHON_BIN} -m experiments.robot.libero.run_libero_eval \
 #   --use_proprio True \

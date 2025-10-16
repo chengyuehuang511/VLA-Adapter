@@ -1,6 +1,7 @@
 #!/bin/bash
 
 name="libero_eval"
+# name="calvin_eval"
 
 job_name="${name}_$(date +%Y%m%d_%H%M%S)"
 output_dir="output/${job_name}"
